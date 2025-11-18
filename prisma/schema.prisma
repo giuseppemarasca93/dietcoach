@@ -1,0 +1,118 @@
+// Prisma schema for DietCoach database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Macro targets for each meal type
+model MacroProfile {
+  id                Int      @id @default(autoincrement())
+  name              String   @default("default")
+
+  breakfastProtein  Int
+  breakfastCarbs    Int
+  breakfastFat      Int
+
+  lunchProtein      Int
+  lunchCarbs        Int
+  lunchFat          Int
+
+  snackProtein      Int
+  snackCarbs        Int
+  snackFat          Int
+
+  dinnerProtein     Int
+  dinnerCarbs       Int
+  dinnerFat         Int
+
+  createdAt         DateTime @default(now())
+}
+
+// User dietary preferences and constraints
+model UserPreferences {
+  id                  Int      @id @default(autoincrement())
+  name                String   @default("default")
+
+  excludedIngredients String?  // comma-separated: "fegato,frattaglie,legumi che gonfiano"
+  preferredCuisines   String?  // comma-separated: "italian,mediterranean"
+  cookingEffort       String   @default("normal")    // "easy" | "normal" | "gourmet"
+  satietyLevel        String   @default("normal")    // "normal" | "high"
+
+  createdAt           DateTime @default(now())
+}
+
+// Weekly intention and dietary goal
+model WeeklyIntent {
+  id         Int         @id @default(autoincrement())
+  weekStart  DateTime
+  goal       String      // "normal" | "high_satiety_low_ferritin" | "gourmet" | "lazy"
+  notes      String?
+
+  createdAt  DateTime    @default(now())
+
+  mealPlans  MealPlan[]
+}
+
+// Recipe from local DB or external API
+model Recipe {
+  id                   Int      @id @default(autoincrement())
+  externalId           String?  // ID from external provider (e.g., Spoonacular)
+  source               String?  // "spoonacular" | "edamam" | "manual"
+  title                String
+  imageUrl             String?
+  sourceUrl            String?
+  servings             Int?
+  caloriesPerServing   Int?
+  proteinPerServing    Float?
+  carbsPerServing      Float?
+  fatPerServing        Float?
+  rawData              Json?    // Full API response for future reference
+
+  meals                Meal[]
+
+  createdAt            DateTime @default(now())
+}
+
+// Weekly meal plan header
+model MealPlan {
+  id             Int           @id @default(autoincrement())
+  weekStart      DateTime
+  weekEnd        DateTime
+  goal           String        // Copied from WeeklyIntent.goal
+
+  weeklyIntentId Int?
+  weeklyIntent   WeeklyIntent? @relation(fields: [weeklyIntentId], references: [id], onDelete: SetNull)
+
+  meals          Meal[]
+  createdAt      DateTime      @default(now())
+}
+
+// Individual meal entry
+model Meal {
+  id          Int       @id @default(autoincrement())
+
+  mealPlanId  Int
+  mealPlan    MealPlan  @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+
+  recipeId    Int?
+  recipe      Recipe?   @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+
+  date        DateTime  // Specific day for this meal
+  type        String    // "breakfast" | "lunch" | "snack" | "dinner"
+
+  protein     Int       // Target protein in grams
+  carbs       Int       // Target carbs in grams
+  fat         Int       // Target fat in grams
+  calories    Int?      // Calculated or provided calories
+
+  createdAt   DateTime  @default(now())
+
+  @@index([mealPlanId])
+  @@index([recipeId])
+  @@index([date])
+}

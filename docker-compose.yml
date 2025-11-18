@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  dietcoach-db:
+    image: postgres:16-alpine
+    container_name: dietcoach-db
+    environment:
+      POSTGRES_USER: dietcoach
+      POSTGRES_PASSWORD: supersecret
+      POSTGRES_DB: dietcoach
+    ports:
+      - "5432:5432"
+    volumes:
+      - dietcoach-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dietcoach"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dietcoach-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dietcoach-api
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      PORT: ${PORT:-3000}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      dietcoach-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  dietcoach-db-data:
+    driver: local
