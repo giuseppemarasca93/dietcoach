@@ -1,155 +1,148 @@
+// src/services/planService.js
 import prisma from '../db/prismaClient.js';
-import { getBestRecipeForMeal } from './recipeService.js';
+import { findRecipeForMeal } from './recipeService.js';
 
 /**
- * Converte una stringa CSV in array di stringhe lowercase
- * es: "latte, Pane ,Tonno" -> ["latte","pane","tonno"]
+ * Converte una stringa YYYY-MM-DD in Date (mezzanotte locale)
  */
-function parseCSV(str) {
-  if (!str) return [];
-  return str
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+function parseDate(isoDateStr) {
+  const d = new Date(isoDateStr);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 /**
- * Generates a complete weekly meal plan
- * @param {string} weekStartStr - Date string in YYYY-MM-DD format
- * @returns {Promise<Object>} - Complete meal plan with meals and recipes
- * @throws {Error} - If date invalid or database errors
+ * Restituisce un oggetto con i target per ogni tipo di pasto,
+ * leggendo dal MacroProfile.
+ */
+function buildMacrosMap(profile) {
+  return {
+    breakfast: {
+      type: 'breakfast',
+      protein: profile.breakfastProtein,
+      carbs: profile.breakfastCarbs,
+      fat: profile.breakfastFat,
+    },
+    lunch: {
+      type: 'lunch',
+      protein: profile.lunchProtein,
+      carbs: profile.lunchCarbs,
+      fat: profile.lunchFat,
+    },
+    snack: {
+      type: 'snack',
+      protein: profile.snackProtein,
+      carbs: profile.snackCarbs,
+      fat: profile.snackFat,
+    },
+    dinner: {
+      type: 'dinner',
+      protein: profile.dinnerProtein,
+      carbs: profile.dinnerCarbs,
+      fat: profile.dinnerFat,
+    },
+  };
+}
+
+/**
+ * Genera il piano settimanale completo (7 giorni x 4 pasti)
+ * a partire dal giorno di inizio settimana (YYYY-MM-DD).
  */
 export async function generateWeekPlan(weekStartStr) {
-  // Step 1: Validate and parse date
-  const weekStart = new Date(weekStartStr);
-  if (isNaN(weekStart.getTime())) {
-    throw new Error('Invalid date format. Use YYYY-MM-DD.');
-  }
-
-  // Step 2: Calculate week end (6 days after start)
+  // 1) Parse date e calcola weekEnd
+  const weekStart = parseDate(weekStartStr);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 6);
 
-  // Step 3: Fetch required data in parallel
-  const [macroProfile, userPreferences, weeklyIntent] = await Promise.all([
-    prisma.macroProfile.findFirst(),
-    prisma.userPreferences.findFirst(),
-    prisma.weeklyIntent.findFirst({
-      orderBy: { weekStart: 'desc' }
-    })
-  ]);
-
-  // Validate MacroProfile exists
+  // 2) Carica MacroProfile
+  const macroProfile = await prisma.macroProfile.findFirst();
   if (!macroProfile) {
     throw new Error('No MacroProfile found. Create one first with POST /macro-profile');
   }
 
-  // Pre-elaboro preferenze e tag (AI-ready)
-  const excludedIngredients = parseCSV(userPreferences?.excludedIngredients || '');
+  // 3) Carica UserPreferences (se esistono)
+  const preferences = await prisma.userPreferences.findFirst();
 
-  // Per ora i tag li lasciamo vuoti: saranno popolati in futuro dall'AI
-  const tagsRequired = [];
-  const tagsPreferred = [];
-  const tagsAvoid = [];
+  // 4) Carica WeeklyIntent (se esiste, per ora prendiamo il più recente <= weekStart)
+  const weeklyIntent = await prisma.weeklyIntent.findFirst({
+    where: {
+      weekStart: {
+        lte: weekStart,
+      },
+    },
+    orderBy: {
+      weekStart: 'desc',
+    },
+  });
 
-  // Step 4: Create MealPlan header
+  // 5) Crea la “testata” del MealPlan
   const mealPlan = await prisma.mealPlan.create({
     data: {
       weekStart,
       weekEnd,
       goal: weeklyIntent?.goal || 'normal',
-      weeklyIntentId: weeklyIntent?.id || null
-    }
+      weeklyIntentId: weeklyIntent?.id ?? null,
+    },
   });
 
-  // Step 5: Define meal types with corresponding macro targets
-  const mealTypes = [
-    {
-      type: 'breakfast',
-      protein: macroProfile.breakfastProtein,
-      carbs: macroProfile.breakfastCarbs,
-      fat: macroProfile.breakfastFat
-    },
-    {
-      type: 'lunch',
-      protein: macroProfile.lunchProtein,
-      carbs: macroProfile.lunchCarbs,
-      fat: macroProfile.lunchFat
-    },
-    {
-      type: 'snack',
-      protein: macroProfile.snackProtein,
-      carbs: macroProfile.snackCarbs,
-      fat: macroProfile.snackFat
-    },
-    {
-      type: 'dinner',
-      protein: macroProfile.dinnerProtein,
-      carbs: macroProfile.dinnerCarbs,
-      fat: macroProfile.dinnerFat
-    }
-  ];
+  const macrosMap = buildMacrosMap(macroProfile);
 
-  // Step 6: Generate 28 meals (7 days × 4 meal types)
-  const meals = [];
-  
+  const mealsToCreate = [];
+  const MEAL_TYPES = ['breakfast', 'lunch', 'snack', 'dinner'];
+
+  // 6) Per ogni giorno della settimana e per ogni pasto
   for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
     const currentDate = new Date(weekStart);
     currentDate.setDate(currentDate.getDate() + dayOffset);
 
-    for (const mealType of mealTypes) {
-      const macroTarget = {
-        protein: mealType.protein,
-        carbs: mealType.carbs,
-        fat: mealType.fat
-      };
+    for (const mealType of MEAL_TYPES) {
+      const target = macrosMap[mealType];
 
-      // Usa il nuovo motore di selezione ricette AI-ready
-      const recipe = await getBestRecipeForMeal({
-        mealType: mealType.type,
-        macroTarget,
-        excludedIngredients,
-        tagsRequired,
-        tagsPreferred,
-        tagsAvoid
+      // Chiede a recipeService la ricetta migliore
+      const recipe = await findRecipeForMeal({
+        mealType,
+        macros: {
+          protein: target.protein,
+          carbs: target.carbs,
+          fat: target.fat,
+        },
+        preferences: preferences || null,
+        weeklyIntent: weeklyIntent || null,
       });
 
-      // Calculate calories (4 cal/g protein, 4 cal/g carbs, 9 cal/g fat)
-      const calories = (mealType.protein * 4) + (mealType.carbs * 4) + (mealType.fat * 9);
+      // Se abbiamo una ricetta, usiamo le sue calorie, altrimenti calcolate dai macro
+      const calories =
+        recipe?.caloriesPerServing ??
+        (target.protein * 4 + target.carbs * 4 + target.fat * 9);
 
-      meals.push({
+      mealsToCreate.push({
         mealPlanId: mealPlan.id,
         date: currentDate,
-        type: mealType.type,
-        protein: mealType.protein,
-        carbs: mealType.carbs,
-        fat: mealType.fat,
-        calories: calories,
-        recipeId: recipe?.id || null
+        type: mealType,
+        protein: target.protein,
+        carbs: target.carbs,
+        fat: target.fat,
+        calories,
+        recipeId: recipe?.id ?? null,
       });
     }
   }
 
-  // Step 7: Batch insert all meals
+  // 7) Inserimento batch di tutti i pasti
   await prisma.meal.createMany({
-    data: meals
+    data: mealsToCreate,
   });
 
-  // Step 8: Fetch complete meal plan with all relationships
+  // 8) Ricarica il MealPlan completo con relazioni
   const completePlan = await prisma.mealPlan.findUnique({
     where: { id: mealPlan.id },
     include: {
       weeklyIntent: true,
       meals: {
-        include: {
-          recipe: true
-        },
-        orderBy: [
-          { date: 'asc' },
-          { type: 'asc' }
-        ]
-      }
-    }
+        include: { recipe: true },
+        orderBy: [{ date: 'asc' }, { type: 'asc' }],
+      },
+    },
   });
 
   return completePlan;

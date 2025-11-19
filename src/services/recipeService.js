@@ -1,6 +1,21 @@
+// src/services/recipeService.js
 import prisma from '../db/prismaClient.js';
 
-function parseCSV(str) {
+/**
+ * Calcola la distanza "macro" (Manhattan) tra target e ricetta.
+ * Più è bassa, più la ricetta è vicina al target.
+ */
+function macroDistance(target, recipe) {
+  const dp = Math.abs((recipe.proteinPerServing ?? 0) - target.protein);
+  const dc = Math.abs((recipe.carbsPerServing ?? 0) - target.carbs);
+  const df = Math.abs((recipe.fatPerServing ?? 0) - target.fat);
+  return dp + dc + df;
+}
+
+/**
+ * Normalizza una lista separata da virgole in array di stringhe lowercased.
+ */
+function normalizeList(str) {
   if (!str) return [];
   return str
     .split(',')
@@ -8,108 +23,84 @@ function parseCSV(str) {
     .filter(Boolean);
 }
 
-function recipeHasExcludedIngredients(recipe, excludedIngredients) {
-  if (!excludedIngredients?.length) return false;
-  const recipeIngredients = parseCSV(recipe.ingredients || '');
-  return recipeIngredients.some((ing) => excludedIngredients.includes(ing));
-}
+/**
+ * Verifica se una ricetta viola le preferenze (ingredienti esclusi, ecc.)
+ */
+function violatesPreferences(recipe, preferences) {
+  if (!preferences) return false;
 
-function recipeHasRequiredTags(recipe, tagsRequired) {
-  if (!tagsRequired?.length) return true;
-  const recipeTags = parseCSV(recipe.tags || '');
-  return tagsRequired.every((tag) => recipeTags.includes(tag));
-}
-
-function scoreRecipe(recipe, macroTarget, tagsPreferred, tagsAvoid) {
-  const dP = (recipe.proteinPerServing ?? 0) - macroTarget.protein;
-  const dC = (recipe.carbsPerServing ?? 0) - macroTarget.carbs;
-  const dF = (recipe.fatPerServing ?? 0) - macroTarget.fat;
-
-  let score = Math.sqrt(dP * dP + dC * dC + dF * dF);
-
-  const tags = parseCSV(recipe.tags || '');
-
-  // bonus per tag preferiti
-  if (tagsPreferred?.length) {
-    tagsPreferred.forEach((pref) => {
-      if (tags.includes(pref)) score -= 5;
-    });
+  // 1) Ingredienti esclusi
+  const excluded = normalizeList(preferences.excludedIngredients);
+  if (excluded.length) {
+    const recipeIngredients = normalizeList(recipe.ingredients);
+    const hasExcluded = recipeIngredients.some((ing) =>
+      excluded.some((ex) => ing.includes(ex))
+    );
+    if (hasExcluded) return true;
   }
 
-  // malus per tag da evitare
-  if (tagsAvoid?.length) {
-    tagsAvoid.forEach((bad) => {
-      if (tags.includes(bad)) score += 5;
-    });
-  }
+  // qui potremmo aggiungere altri vincoli (es. effort, cuisine) in futuro
 
-  return score;
+  return false;
 }
 
 /**
- * NUOVA FUNZIONE usata da planService.js
- * Seleziona la ricetta "migliore" per un pasto:
- * - filtra per mealType
- * - esclude ingredienti vietati
- * - rispetta tagRequired
- * - usa i macro per il punteggio
+ * Trova la miglior ricetta per un pasto, considerando:
+ * - tipo di pasto (mealType)
+ * - target macro
+ * - preferenze utente
+ * - weeklyIntent (per ora non usato, ma già previsto)
  */
-export async function getBestRecipeForMeal({
-  mealType,
-  macroTarget,
-  excludedIngredients = [],
-  tagsRequired = [],
-  tagsPreferred = [],
-  tagsAvoid = [],
-}) {
-  const recipes = await prisma.recipe.findMany({
-    where: { mealType },
-  });
+export async function findRecipeForMeal({ mealType, macros, preferences, weeklyIntent }) {
+  // 1) Carica tutte le ricette
+  let recipes = await prisma.recipe.findMany();
 
-  if (!recipes.length) return null;
+  if (!recipes.length) {
+    return null;
+  }
 
-  const filtered = recipes.filter((r) => {
-    if (recipeHasExcludedIngredients(r, excludedIngredients)) return false;
-    if (!recipeHasRequiredTags(r, tagsRequired)) return false;
-    return true;
-  });
+  // 2) Filtra per tipo di pasto se la ricetta ha mealType impostato
+  if (mealType) {
+    recipes = recipes.filter((r) => !r.mealType || r.mealType === mealType);
+  }
 
-  if (!filtered.length) return null;
+  // 3) Filtra per preferenze (ingredienti esclusi, ecc.)
+  recipes = recipes.filter((recipe) => !violatesPreferences(recipe, preferences));
 
-  let best = filtered[0];
-  let bestScore = scoreRecipe(best, macroTarget, tagsPreferred, tagsAvoid);
+  if (!recipes.length) {
+    // Nessuna ricetta valida per questo pasto con queste preferenze
+    return null;
+  }
 
-  for (let i = 1; i < filtered.length; i++) {
-    const r = filtered[i];
-    const s = scoreRecipe(r, macroTarget, tagsPreferred, tagsAvoid);
-    if (s < bestScore) {
-      best = r;
-      bestScore = s;
+  let best = null;
+  let bestScore = Infinity;
+
+  for (const recipe of recipes) {
+    const distance = macroDistance(macros, recipe);
+
+    // 4) Applichiamo un piccolo "bonus" se l'utente vuole alta sazietà
+    //    e la ricetta ha il tag high_satiety.
+    let bonus = 0;
+    if (preferences?.satietyLevel === 'high') {
+      const tags = normalizeList(recipe.tags);
+      if (!tags.includes('high_satiety')) {
+        bonus += 10; // penalità se NON è high_satiety
+      }
+    }
+
+    const score = distance + bonus;
+
+    if (score < bestScore) {
+      bestScore = score;
+      best = recipe;
     }
   }
 
+  // 5) Se la distanza è troppo alta, meglio non assegnare alcuna ricetta
+  const MAX_DISTANCE = 80;
+  if (bestScore > MAX_DISTANCE) {
+    return null;
+  }
+
   return best;
-}
-
-/**
- * Vecchio nome, lasciato come alias per compatibilità (se mai servisse)
- */
-export async function findRecipeForMeal(params) {
-  const { mealType, macros, preferences, weeklyIntent } = params;
-
-  const macroTarget = macros || {
-    protein: 0,
-    carbs: 0,
-    fat: 0,
-  };
-
-  // per ora non usiamo ancora preferences/weeklyIntent qui
-  return getBestRecipeForMeal({
-    mealType,
-    macroTarget,
-    excludedIngredients: [],
-    tagsRequired: [],
-    tagsPreferred: [],
-    tagsAvoid: [],
-  });
 }
