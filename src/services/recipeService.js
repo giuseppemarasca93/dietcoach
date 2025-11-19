@@ -1,52 +1,115 @@
 import prisma from '../db/prismaClient.js';
 
-/**
- * Calculate Manhattan distance between target macros and recipe macros
- * @param {Object} target - Target macros {protein, carbs, fat}
- * @param {Object} recipe - Recipe with macro data
- * @returns {number} - Distance score (lower is better)
- */
-function macroDistance(target, recipe) {
-  const dp = Math.abs((recipe.proteinPerServing ?? 0) - target.protein);
-  const dc = Math.abs((recipe.carbsPerServing ?? 0) - target.carbs);
-  const df = Math.abs((recipe.fatPerServing ?? 0) - target.fat);
-  return dp + dc + df;
+function parseCSV(str) {
+  if (!str) return [];
+  return str
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function recipeHasExcludedIngredients(recipe, excludedIngredients) {
+  if (!excludedIngredients?.length) return false;
+  const recipeIngredients = parseCSV(recipe.ingredients || '');
+  return recipeIngredients.some((ing) => excludedIngredients.includes(ing));
+}
+
+function recipeHasRequiredTags(recipe, tagsRequired) {
+  if (!tagsRequired?.length) return true;
+  const recipeTags = parseCSV(recipe.tags || '');
+  return tagsRequired.every((tag) => recipeTags.includes(tag));
+}
+
+function scoreRecipe(recipe, macroTarget, tagsPreferred, tagsAvoid) {
+  const dP = (recipe.proteinPerServing ?? 0) - macroTarget.protein;
+  const dC = (recipe.carbsPerServing ?? 0) - macroTarget.carbs;
+  const dF = (recipe.fatPerServing ?? 0) - macroTarget.fat;
+
+  let score = Math.sqrt(dP * dP + dC * dC + dF * dF);
+
+  const tags = parseCSV(recipe.tags || '');
+
+  // bonus per tag preferiti
+  if (tagsPreferred?.length) {
+    tagsPreferred.forEach((pref) => {
+      if (tags.includes(pref)) score -= 5;
+    });
+  }
+
+  // malus per tag da evitare
+  if (tagsAvoid?.length) {
+    tagsAvoid.forEach((bad) => {
+      if (tags.includes(bad)) score += 5;
+    });
+  }
+
+  return score;
 }
 
 /**
- * Finds best matching recipe for given meal parameters
- * @param {Object} params
- * @param {string} params.mealType - "breakfast" | "lunch" | "snack" | "dinner"
- * @param {Object} params.macros - { protein, carbs, fat }
- * @param {Object} params.preferences - User preferences object
- * @param {Object} params.weeklyIntent - Weekly intent object
- * @returns {Promise<Object|null>} - Best matching recipe or null
+ * NUOVA FUNZIONE usata da planService.js
+ * Seleziona la ricetta "migliore" per un pasto:
+ * - filtra per mealType
+ * - esclude ingredienti vietati
+ * - rispetta tagRequired
+ * - usa i macro per il punteggio
  */
-export async function findRecipeForMeal({ mealType, macros, preferences, weeklyIntent }) {
-  // Fetch all available recipes from database
-  const recipes = await prisma.recipe.findMany();
-  
-  if (!recipes.length) {
-    return null;
-  }
+export async function getBestRecipeForMeal({
+  mealType,
+  macroTarget,
+  excludedIngredients = [],
+  tagsRequired = [],
+  tagsPreferred = [],
+  tagsAvoid = [],
+}) {
+  const recipes = await prisma.recipe.findMany({
+    where: { mealType },
+  });
 
-  let best = null;
-  let bestDistance = Infinity;
+  if (!recipes.length) return null;
 
-  // Find recipe with minimum macro distance
-  for (const recipe of recipes) {
-    const distance = macroDistance(macros, recipe);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = recipe;
+  const filtered = recipes.filter((r) => {
+    if (recipeHasExcludedIngredients(r, excludedIngredients)) return false;
+    if (!recipeHasRequiredTags(r, tagsRequired)) return false;
+    return true;
+  });
+
+  if (!filtered.length) return null;
+
+  let best = filtered[0];
+  let bestScore = scoreRecipe(best, macroTarget, tagsPreferred, tagsAvoid);
+
+  for (let i = 1; i < filtered.length; i++) {
+    const r = filtered[i];
+    const s = scoreRecipe(r, macroTarget, tagsPreferred, tagsAvoid);
+    if (s < bestScore) {
+      best = r;
+      bestScore = s;
     }
   }
 
-  // Maximum acceptable distance threshold
-  const MAX_DISTANCE = 80;
-  if (bestDistance > MAX_DISTANCE) {
-    return null;
-  }
-
   return best;
+}
+
+/**
+ * Vecchio nome, lasciato come alias per compatibilità (se mai servisse)
+ */
+export async function findRecipeForMeal(params) {
+  const { mealType, macros, preferences, weeklyIntent } = params;
+
+  const macroTarget = macros || {
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+  };
+
+  // per ora non usiamo ancora preferences/weeklyIntent qui
+  return getBestRecipeForMeal({
+    mealType,
+    macroTarget,
+    excludedIngredients: [],
+    tagsRequired: [],
+    tagsPreferred: [],
+    tagsAvoid: [],
+  });
 }

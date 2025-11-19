@@ -1,5 +1,17 @@
 import prisma from '../db/prismaClient.js';
-import { findRecipeForMeal } from './recipeService.js';
+import { getBestRecipeForMeal } from './recipeService.js';
+
+/**
+ * Converte una stringa CSV in array di stringhe lowercase
+ * es: "latte, Pane ,Tonno" -> ["latte","pane","tonno"]
+ */
+function parseCSV(str) {
+  if (!str) return [];
+  return str
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
 
 /**
  * Generates a complete weekly meal plan
@@ -31,6 +43,14 @@ export async function generateWeekPlan(weekStartStr) {
   if (!macroProfile) {
     throw new Error('No MacroProfile found. Create one first with POST /macro-profile');
   }
+
+  // Pre-elaboro preferenze e tag (AI-ready)
+  const excludedIngredients = parseCSV(userPreferences?.excludedIngredients || '');
+
+  // Per ora i tag li lasciamo vuoti: saranno popolati in futuro dall'AI
+  const tagsRequired = [];
+  const tagsPreferred = [];
+  const tagsAvoid = [];
 
   // Step 4: Create MealPlan header
   const mealPlan = await prisma.mealPlan.create({
@@ -78,16 +98,20 @@ export async function generateWeekPlan(weekStartStr) {
     currentDate.setDate(currentDate.getDate() + dayOffset);
 
     for (const mealType of mealTypes) {
-      // Try to find a matching recipe
-      const recipe = await findRecipeForMeal({
+      const macroTarget = {
+        protein: mealType.protein,
+        carbs: mealType.carbs,
+        fat: mealType.fat
+      };
+
+      // Usa il nuovo motore di selezione ricette AI-ready
+      const recipe = await getBestRecipeForMeal({
         mealType: mealType.type,
-        macros: {
-          protein: mealType.protein,
-          carbs: mealType.carbs,
-          fat: mealType.fat
-        },
-        preferences: userPreferences,
-        weeklyIntent: weeklyIntent
+        macroTarget,
+        excludedIngredients,
+        tagsRequired,
+        tagsPreferred,
+        tagsAvoid
       });
 
       // Calculate calories (4 cal/g protein, 4 cal/g carbs, 9 cal/g fat)

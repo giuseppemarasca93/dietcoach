@@ -73,6 +73,10 @@ model Recipe {
   fatPerServing        Float?
   rawData              Json?    // Full API response for future reference
 
+  mealType             String?  // "breakfast" | "lunch" | "snack" | "dinner"
+  ingredients          String?  // "latte,uova,pollo"
+  tags                 String?  // "gluten_free,high_satiety,iron_rich"
+
   meals                Meal[]
 
   createdAt            DateTime @default(now())
