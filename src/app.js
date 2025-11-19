@@ -4,6 +4,10 @@ import cors from 'cors';
 import prisma from './db/prismaClient.js';
 import { generateWeekPlan } from './services/planService.js';
 
+// Import new routes
+import aiRoutes from './routes/ai.js';
+import recipeRoutes from './routes/recipes.js';
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -15,6 +19,13 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.json({ message: 'DietCoach AI server is running 🚀' });
 });
+
+// ==================== NEW API ROUTES ====================
+// AI-powered meal planning
+app.use('/api/ai', aiRoutes);
+
+// Recipe search (external API)
+app.use('/api/recipes', recipeRoutes);
 
 // ==================== MACRO PROFILE ENDPOINTS ====================
 
@@ -59,7 +70,7 @@ app.get('/preferences', async (req, res) => {
 app.post('/preferences', async (req, res) => {
   try {
     const existing = await prisma.userPreferences.findFirst();
-    
+
     if (existing) {
       const updated = await prisma.userPreferences.update({
         where: { id: existing.id },
@@ -97,7 +108,7 @@ app.get('/weekly-intent', async (req, res) => {
 app.post('/weekly-intent', async (req, res) => {
   try {
     const { weekStart, goal, notes } = req.body;
-    
+
     if (!weekStart || !goal) {
       return res.status(400).json({ error: 'weekStart and goal are required' });
     }
@@ -138,11 +149,11 @@ app.get('/recipes/:id', async (req, res) => {
     const recipe = await prisma.recipe.findUnique({
       where: { id }
     });
-    
+
     if (!recipe) {
       return res.status(404).json({ error: 'Recipe not found' });
     }
-    
+
     res.json(recipe);
   } catch (error) {
     console.error('Error fetching recipe:', error);
@@ -169,7 +180,7 @@ app.get('/recipes', async (req, res) => {
 app.post('/meal-plans', async (req, res) => {
   try {
     const { weekStart, weekEnd, goal, weeklyIntentId } = req.body;
-    
+
     if (!weekStart || !weekEnd || !goal) {
       return res.status(400).json({ error: 'weekStart, weekEnd, and goal are required' });
     }
@@ -225,11 +236,11 @@ app.get('/meal-plans/:id', async (req, res) => {
         }
       }
     });
-    
+
     if (!plan) {
       return res.status(404).json({ error: 'Meal plan not found' });
     }
-    
+
     res.json(plan);
   } catch (error) {
     console.error('Error fetching meal plan:', error);
@@ -242,10 +253,10 @@ app.post('/meal-plans/:id/meals', async (req, res) => {
   try {
     const mealPlanId = parseInt(req.params.id);
     const { date, type, protein, carbs, fat, recipeId, calories } = req.body;
-    
+
     if (!date || !type || protein === undefined || carbs === undefined || fat === undefined) {
-      return res.status(400).json({ 
-        error: 'date, type, protein, carbs, and fat are required' 
+      return res.status(400).json({
+        error: 'date, type, protein, carbs, and fat are required'
       });
     }
 
@@ -253,7 +264,7 @@ app.post('/meal-plans/:id/meals', async (req, res) => {
     const mealPlan = await prisma.mealPlan.findUnique({
       where: { id: mealPlanId }
     });
-    
+
     if (!mealPlan) {
       return res.status(404).json({ error: 'Meal plan not found' });
     }
@@ -273,7 +284,7 @@ app.post('/meal-plans/:id/meals', async (req, res) => {
         recipe: true
       }
     });
-    
+
     res.status(201).json(meal);
   } catch (error) {
     console.error('Error adding meal:', error);
@@ -287,7 +298,7 @@ app.post('/meal-plans/:id/meals', async (req, res) => {
 app.post('/generate-week', async (req, res) => {
   try {
     const { weekStart } = req.body;
-    
+
     if (!weekStart) {
       return res.status(400).json({ error: 'weekStart is required (YYYY-MM-DD format)' });
     }
@@ -319,14 +330,21 @@ let server;
 
 async function startServer() {
   try {
+    // Validate required environment variables
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL environment variable is required');
+    }
+
     // Test database connection
-    await prisma.$connect();
+    await prisma.\();
     console.log('✅ Database connected successfully');
 
     // Start Express server
     server = app.listen(PORT, () => {
-      console.log(`🚀 DietCoach API listening on port ${PORT}`);
-      console.log(`📍 Health check: http://localhost:${PORT}/`);
+      console.log(\🚀 DietCoach API listening on port \\);
+      console.log(\📍 Health check: http://localhost:\/\);
+      console.log(\🤖 AI meal plans: http://localhost:\/api/ai/mealplan/generate\);
+      console.log(\🔍 Recipe search: http://localhost:\/api/recipes/search\);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -337,17 +355,17 @@ async function startServer() {
 // ==================== GRACEFUL SHUTDOWN ====================
 
 async function gracefulShutdown(signal) {
-  console.log(`\n${signal} received, closing server gracefully...`);
-  
+  console.log(\\n\ received, closing server gracefully...\);
+
   if (server) {
     server.close(async () => {
       console.log('Server closed');
-      await prisma.$disconnect();
+      await prisma.\();
       console.log('Database disconnected');
       process.exit(0);
     });
   } else {
-    await prisma.$disconnect();
+    await prisma.\();
     process.exit(0);
   }
 }
@@ -357,3 +375,4 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Start the server
 startServer();
+

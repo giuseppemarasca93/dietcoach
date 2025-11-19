@@ -1,0 +1,309 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "DietCoach AI Backend API",
+    "version": "2.0.0",
+    "description": "Meal planning API with AI-powered meal generation and external recipe search"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Development server"
+    }
+  ],
+  "paths": {
+    "/api/ai/mealplan/generate": {
+      "post": {
+        "summary": "Generate AI-powered meal plan",
+        "tags": ["AI Meal Planning"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "weekStart": {
+                    "type": "string",
+                    "format": "date",
+                    "example": "2025-11-19"
+                  },
+                  "mealsPerDay": {
+                    "type": "integer",
+                    "minimum": 3,
+                    "maximum": 6,
+                    "default": 4,
+                    "example": 4
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Meal plan generated successfully"
+          },
+          "400": {
+            "description": "Invalid request data or exclusion violation"
+          },
+          "404": {
+            "description": "MacroProfile not found"
+          },
+          "500": {
+            "description": "Server error"
+          },
+          "503": {
+            "description": "AI service temporarily unavailable"
+          }
+        }
+      }
+    },
+    "/api/ai/mealplan/{id}": {
+      "get": {
+        "summary": "Get meal plan by ID",
+        "tags": ["AI Meal Planning"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meal plan retrieved successfully"
+          },
+          "404": {
+            "description": "Meal plan not found"
+          }
+        }
+      }
+    },
+    "/api/recipes/search": {
+      "get": {
+        "summary": "Search external recipes from Edamam",
+        "tags": ["Recipes"],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "chicken"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recipes found (may be empty if API unavailable)",
+            "headers": {
+              "X-External-Api-Status": {
+                "schema": {
+                  "type": "string",
+                  "enum": ["ok", "degraded"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          }
+        }
+      }
+    },
+    "/macro-profile": {
+      "get": {
+        "summary": "Get macro profile",
+        "tags": ["Configuration"],
+        "responses": {
+          "200": {
+            "description": "Macro profile retrieved"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create macro profile",
+        "tags": ["Configuration"],
+        "responses": {
+          "201": {
+            "description": "Macro profile created"
+          }
+        }
+      }
+    },
+    "/preferences": {
+      "get": {
+        "summary": "Get user preferences",
+        "tags": ["Configuration"],
+        "responses": {
+          "200": {
+            "description": "Preferences retrieved"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create or update preferences",
+        "tags": ["Configuration"],
+        "responses": {
+          "200": {
+            "description": "Preferences updated"
+          },
+          "201": {
+            "description": "Preferences created"
+          }
+        }
+      }
+    },
+    "/weekly-intent": {
+      "get": {
+        "summary": "Get latest weekly intent",
+        "tags": ["Configuration"],
+        "responses": {
+          "200": {
+            "description": "Weekly intent retrieved"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create weekly intent",
+        "tags": ["Configuration"],
+        "responses": {
+          "201": {
+            "description": "Weekly intent created"
+          }
+        }
+      }
+    },
+    "/recipes": {
+      "get": {
+        "summary": "Get all recipes",
+        "tags": ["Recipes"],
+        "responses": {
+          "200": {
+            "description": "Recipes retrieved"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create recipe",
+        "tags": ["Recipes"],
+        "responses": {
+          "201": {
+            "description": "Recipe created"
+          }
+        }
+      }
+    },
+    "/recipes/{id}": {
+      "get": {
+        "summary": "Get recipe by ID",
+        "tags": ["Recipes"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recipe retrieved"
+          },
+          "404": {
+            "description": "Recipe not found"
+          }
+        }
+      }
+    },
+    "/meal-plans": {
+      "get": {
+        "summary": "Get all meal plans",
+        "tags": ["Meal Plans"],
+        "responses": {
+          "200": {
+            "description": "Meal plans retrieved"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create meal plan header",
+        "tags": ["Meal Plans"],
+        "responses": {
+          "201": {
+            "description": "Meal plan created"
+          }
+        }
+      }
+    },
+    "/meal-plans/{id}": {
+      "get": {
+        "summary": "Get meal plan with details",
+        "tags": ["Meal Plans"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meal plan retrieved"
+          },
+          "404": {
+            "description": "Meal plan not found"
+          }
+        }
+      }
+    },
+    "/generate-week": {
+      "post": {
+        "summary": "Generate weekly meal plan (legacy)",
+        "tags": ["Meal Plans"],
+        "responses": {
+          "201": {
+            "description": "Week plan generated"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "AI Meal Planning",
+      "description": "OpenAI-powered meal plan generation"
+    },
+    {
+      "name": "Recipes",
+      "description": "Recipe management and external API search"
+    },
+    {
+      "name": "Configuration",
+      "description": "User preferences and macro profiles"
+    },
+    {
+      "name": "Meal Plans",
+      "description": "Meal plan CRUD operations"
+    }
+  ]
+}
